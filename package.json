@@ -1,0 +1,23 @@
+{
+  "name": "maple-mmo",
+  "version": "0.1.0",
+  "description": "심플 2D 횡스크롤 멀티플레이어 RPG (메이플스토리 스타일 간소화 버전)",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "keywords": [
+    "mmorpg",
+    "phaser",
+    "socket.io",
+    "game"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "phaser": "^3.80.1",
+    "socket.io": "^4.7.5"
+  }
+}

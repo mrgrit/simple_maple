@@ -14,7 +14,7 @@
 |------|------|------|
 | 0 | 프로젝트 셋업 (구조, Express 정적 서버, Phaser 빈 씬, Socket.IO 연결) | ✅ 완료 |
 | 1 | 싱글 이동 (중력/플랫폼/점프, 좌우 이동, 카메라 추적) | ✅ 완료 |
-| 2 | 멀티플레이어 동기화 (접속/이동/퇴장, 닉네임, 위치 보간) | ⬜ 예정 |
+| 2 | 멀티플레이어 동기화 (접속/이동/퇴장, 닉네임, 위치 보간) | ✅ 완료 |
 | 3 | 몬스터 & 전투 (스폰/배회/리스폰, 공격 판정, 서버 권위 HP) | ⬜ 예정 |
 | 4 | 성장 시스템 (EXP/레벨/스탯, 레벨업, HUD 연동) | ⬜ 예정 |
 | 5 | 채팅 & UI 마감 (채팅, 말풍선, HP/MP/EXP 바) | ⬜ 예정 |
@@ -101,15 +101,23 @@ npm run dev
 - [ ] 캐릭터가 화면 밖으로 나가면 카메라가 따라 이동한다(맵 경계에서 멈춤).
 - [ ] 캐릭터 머리 위에 닉네임이 표시된다.
 
+### Phase 2 — 멀티플레이어 동기화 확인 (브라우저 2개 이상)
+- [ ] 브라우저 2개(또는 다른 기기)에서 각각 다른 닉네임으로 접속한다.
+- [ ] 서로 상대 캐릭터(초록색)와 머리 위 닉네임이 보인다.
+- [ ] 한쪽이 이동/점프하면 다른 쪽 화면에서 부드럽게(보간) 따라 움직인다.
+- [ ] 우상단 "접속자: N명" 숫자가 접속/퇴장에 맞게 갱신된다.
+- [ ] 한쪽이 탭을 닫으면 다른 쪽에서 해당 캐릭터가 사라진다.
+
 ### 자동 스모크 테스트 (선택)
 
-헤드리스 브라우저(Puppeteer)로 Phase 1 동작(중력/착지/이동/방향전환/점프/콘솔에러)을
-자동 검증할 수 있습니다. Puppeteer는 용량이 커서 기본 의존성에는 포함하지 않았습니다.
+헤드리스 브라우저(Puppeteer)로 동작을 자동 검증할 수 있습니다.
+Puppeteer는 용량이 커서 기본 의존성에는 포함하지 않았습니다.
 
 ```bash
 # 서버를 먼저 실행해 둔 상태에서:
 npm install --no-save puppeteer          # 최초 1회 (Chromium 다운로드)
-node test/e2e_phase1.js                   # 11개 항목 통과 시 종료코드 0
+node test/e2e_phase1.js                   # Phase 1: 이동/점프/착지 등 11개 항목
+node test/e2e_phase2.js                   # Phase 2: 2인 접속/이동 보간/퇴장 6개 항목
 ```
 
 > Ubuntu에서 Chromium 실행에 필요한 시스템 라이브러리와 `unzip` 이 없으면
@@ -140,7 +148,8 @@ maple-mmo/
 │   │       └── GameScene.js   # 메인 게임 로직
 │   └── assets/             # 스프라이트/타일 (현재 비어있음 — 코드 생성 도형 사용)
 ├── test/
-│   └── e2e_phase1.js       # (선택) 헤드리스 브라우저 스모크 테스트
+│   ├── e2e_phase1.js       # (선택) Phase 1 스모크 테스트
+│   └── e2e_phase2.js       # (선택) Phase 2 멀티플레이어 테스트
 └── README.md
 ```
 
@@ -148,12 +157,19 @@ maple-mmo/
 
 ## 통신 프로토콜 (현재 구현)
 
-- **C→S**: `join {nick}`, `move {x,y,vx,vy,dir,anim}` *(move 는 Phase 2에서 본격 사용)*
-- **S→C**: `init {selfId, self, map, players, monsters, tuning}`
+- **C→S**
+  - `join {nick}` — 닉네임으로 참가
+  - `move {x,y,vx,vy,dir,anim}` — 내 위치 보고 (20Hz, 변경 시에만)
+- **S→C**
+  - `init {selfId, self, map, players, monsters, tuning}` — 접속 초기 상태
+  - `playerJoined {id,nick,x,y,dir,...}` — 다른 플레이어 접속
+  - `playerMoved {id,x,y,vx,vy,dir,anim}` — 다른 플레이어 이동(서버 검증 후 중계)
+  - `playerLeft id` — 다른 플레이어 퇴장
 
 > 좌표는 정수로 반올림해 전송하여 트래픽을 최소화합니다.
-> 이후 Phase에서 `playerJoined/playerMoved/playerLeft`, `monstersUpdate`, `monsterHit`,
-> `monsterDied`, `levelUp`, `chat` 등이 추가됩니다.
+> 이동은 서버가 검증(맵 경계 클램프 + 과속 거부)한 뒤 다른 클라이언트로 중계하며,
+> 수신 측은 100ms 보간 지연으로 부드럽게 렌더링합니다.
+> 이후 Phase에서 `monstersUpdate`, `monsterHit`, `monsterDied`, `levelUp`, `chat` 등이 추가됩니다.
 
 ---
 

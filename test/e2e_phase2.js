@@ -37,7 +37,7 @@ async function startClient(browser, nick) {
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push('console.error: ' + m.text());
   });
-  await page.goto('http://localhost:3000', { waitUntil: 'domcontentloaded', timeout: 15000 });
+  await page.goto((process.env.BASE_URL || 'http://localhost:3000'), { waitUntil: 'domcontentloaded', timeout: 15000 });
   await page.waitForSelector('#nick', { timeout: 5000 });
   await page.type('#nick', nick);
   await page.click('#startBtn');

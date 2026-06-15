@@ -25,6 +25,9 @@ const state = new GameState();
 // 현재는 단일 맵 사용 (Phase 6에서 다중 맵 확장)
 const MAP = getMap('village');
 
+// 맵의 스폰 데이터로 몬스터 생성 (서버 권위)
+state.spawnMonsters(MAP.monsterSpawns);
+
 // ----------------------- 이동 검증 (반권위 모델) -----------------------
 // 클라이언트가 보고한 이동 데이터를 신뢰하지 않고 정제/검증한다.
 // 비정상 좌표는 맵 경계로 클램프, 비정상 수평 속도는 거부(치팅 차단).
@@ -93,13 +96,15 @@ io.on('connection', (socket) => {
       self: player.serialize(),
       map: MAP,
       players: state.serializePlayers(socket.id), // 나 제외 (현재 접속 중인 다른 플레이어들)
-      monsters: [],                               // Phase 3부터 채워짐
+      monsters: state.serializeMonsters(),        // 현재 몬스터 상태
       tuning: {
         gravity: config.WORLD.GRAVITY,
         speed: config.PLAYER.SPEED,
         jump: config.PLAYER.JUMP,
         playerW: config.PLAYER.WIDTH,
         playerH: config.PLAYER.HEIGHT,
+        attackCooldown: config.COMBAT.ATTACK_COOLDOWN_MS,
+        attackRange: config.COMBAT.ATTACK_RANGE,
       },
     });
 
@@ -120,6 +125,31 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('playerMoved', { id: socket.id, ...clean });
   });
 
+  // C→S: 공격 → 서버에서 근접 판정/데미지 계산(권위)
+  socket.on('attack', ({ dir } = {}) => {
+    const player = state.getPlayer(socket.id);
+    if (!player) return;
+
+    const now = Date.now();
+    const result = state.resolveAttack(player, dir, now);
+    if (!result) return; // 쿨다운 중 → 무시
+
+    // 공격 모션은 모두에게 보여줌(다른 플레이어의 휘두르기 연출용)
+    socket.broadcast.emit('playerAttacked', { id: socket.id, dir: result.facing });
+
+    for (const h of result.hits) {
+      const m = h.monster;
+      if (h.died) {
+        // 사망: 모두에게 알림 + 처치자에게 EXP 지급(레벨업 처리는 Phase 4)
+        io.emit('monsterDied', { id: m.id, by: socket.id, expDrop: m.expDrop, x: m.x, y: m.y });
+        socket.emit('expGained', { exp: m.expDrop, total: player.exp });
+        console.log(`[처치] ${player.nick} → ${m.id} (+${m.expDrop} EXP, 누적 ${player.exp})`);
+      } else {
+        io.emit('monsterHit', { id: m.id, hp: h.hp, dmg: h.dmg, by: socket.id, x: m.x, y: m.y });
+      }
+    }
+  });
+
   // 연결 종료
   socket.on('disconnect', () => {
     const player = state.getPlayer(socket.id);
@@ -132,9 +162,18 @@ io.on('connection', (socket) => {
   });
 });
 
-// ----------------------- 서버 게임 루프 (Phase 3부터 본격 사용) -----------------------
-// const TICK_MS = 1000 / config.TICK_RATE;
-// setInterval(() => { /* 몬스터 AI 갱신 + monstersUpdate 브로드캐스트 */ }, TICK_MS);
+// ----------------------- 서버 게임 루프 -----------------------
+// 고정 틱(TICK_RATE Hz)으로 몬스터 AI/리스폰을 갱신하고 전체에 브로드캐스트한다.
+const TICK_MS = 1000 / config.TICK_RATE;
+let lastTick = Date.now();
+setInterval(() => {
+  const now = Date.now();
+  const dt = (now - lastTick) / 1000; // 초 단위
+  lastTick = now;
+
+  state.updateMonsters(dt, now);
+  io.emit('monstersUpdate', state.serializeMonsters());
+}, TICK_MS);
 
 // ----------------------- 서버 시작 -----------------------
 server.listen(config.PORT, config.HOST, () => {

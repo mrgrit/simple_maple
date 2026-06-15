@@ -26,10 +26,11 @@ const maps = {
 
     // 몬스터 스폰 데이터 (Phase 3에서 사용)
     // { type, x, y, patrolMin, patrolMax }
+    // y=664 → 슬라임(36x32, 중심 원점)이 바닥(상단 680) 위에 서도록
     monsterSpawns: [
-      { type: 'slime', x: 400,  y: 640, patrolMin: 100,  patrolMax: 700 },
-      { type: 'slime', x: 1100, y: 640, patrolMin: 850,  patrolMax: 1400 },
-      { type: 'slime', x: 1800, y: 640, patrolMin: 1550, patrolMax: 2100 },
+      { type: 'slime', x: 400,  y: 664, patrolMin: 100,  patrolMax: 700 },
+      { type: 'slime', x: 1100, y: 664, patrolMin: 850,  patrolMax: 1400 },
+      { type: 'slime', x: 1800, y: 664, patrolMin: 1550, patrolMax: 2100 },
     ],
   },
 };

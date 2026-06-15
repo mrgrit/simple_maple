@@ -27,6 +27,9 @@ class Player {
     this.maxMp = config.PLAYER.MAX_MP;
     this.mp = this.maxMp;
     this.atk = config.GROWTH.BASE_ATK;
+
+    // 전투
+    this.lastAttackAt = 0; // 마지막 공격 시각(ms) — 연사 차단용
   }
 
   // 클라이언트가 보고한 이동 상태를 반영 (Phase 2에서 검증과 함께 사용)

@@ -41,7 +41,7 @@ const ok = (name, cond, extra = '') => {
     });
 
   try {
-    await page.goto('http://localhost:3000', { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto((process.env.BASE_URL || 'http://localhost:3000'), { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     // 닉네임 입력 후 시작
     await page.waitForSelector('#nick', { timeout: 5000 });

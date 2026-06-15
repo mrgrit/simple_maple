@@ -41,9 +41,19 @@ module.exports = {
   // 몬스터 밸런스 (Phase 3에서 사용)
   MONSTER: {
     DEFAULT_HP: 30,
-    SPEED: 40,
+    SPEED: 40,         // 배회 속도 (px/s)
     EXP_DROP: 12,
-    RESPAWN_MS: 4000, // 사망 후 리스폰까지 대기 시간
+    RESPAWN_MS: 4000,  // 사망 후 리스폰까지 대기 시간
+    WIDTH: 36,
+    HEIGHT: 32,
+    TOUCH_DAMAGE: 6,   // 몬스터 접촉 시 플레이어가 받는 데미지(Phase 4 HP 연동)
+  },
+
+  // 전투 (Phase 3에서 사용) — 모든 판정/데미지는 서버 권위
+  COMBAT: {
+    ATTACK_RANGE: 70,        // 근접 공격 사거리(앞쪽, px)
+    ATTACK_VTOL: 50,         // 공격 유효 수직 허용 오차(px)
+    ATTACK_COOLDOWN_MS: 350, // 공격 쿨다운(연사 차단)
   },
 
   // 이동 검증 (반권위 모델 — 비정상 좌표/속도 차단, Phase 2에서 사용)

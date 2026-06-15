@@ -28,9 +28,14 @@ window.Net = {
     this.socket.emit('join', { nick });
   },
 
-  // C→S: 이동 보고 (Phase 2에서 주기적으로 호출)
+  // C→S: 이동 보고 (주기적으로 호출)
   sendMove(stateObj) {
     this.socket.emit('move', stateObj);
+  },
+
+  // C→S: 공격
+  sendAttack(dir) {
+    this.socket.emit('attack', { dir });
   },
 
   // 이벤트 구독 헬퍼

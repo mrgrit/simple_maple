@@ -61,7 +61,8 @@ class GameState {
   }
 
   // ---------------- 전투 (서버 권위) ----------------
-  // 플레이어의 근접 공격 판정. 쿨다운 중이면 null, 아니면 { facing, hits } 반환.
+  // 플레이어의 근접 공격 판정. 쿨다운 중이면 null.
+  // 반환: { facing, hits, expGained, leveledUp, levels }
   // hits: [{ monster, dmg, died, hp }]
   resolveAttack(player, dir, now) {
     const cd = config.COMBAT.ATTACK_COOLDOWN_MS;
@@ -75,17 +76,56 @@ class GameState {
     const maxX = facing === 'right' ? player.x + range : player.x;
 
     const hits = [];
+    let expGained = 0;
     for (const m of this.monsters.values()) {
       if (!m.alive) continue;
       if (m.x >= minX && m.x <= maxX && Math.abs(m.y - player.y) <= vtol) {
         const res = m.takeDamage(player.atk, now);
         if (res) {
           hits.push({ monster: m, dmg: player.atk, died: res.died, hp: res.hp });
-          if (res.died) player.exp += m.expDrop; // EXP 획득(레벨업은 Phase 4)
+          if (res.died) expGained += m.expDrop;
         }
       }
     }
-    return { facing, hits };
+
+    // EXP 획득 → 레벨업 처리(서버 권위, 초과분 이월)
+    const growth = expGained > 0 ? player.gainExp(expGained) : { leveledUp: false, levels: [] };
+    return { facing, hits, expGained, leveledUp: growth.leveledUp, levels: growth.levels };
+  }
+
+  // ---------------- 몬스터 접촉 데미지 (서버 권위, 매 틱) ----------------
+  // 살아있는 플레이어와 몬스터의 AABB 겹침을 검사해 접촉 데미지를 적용한다.
+  // 반환: [{ player, dmg, died, hp }] (실제 데미지가 들어간 건만)
+  resolveMonsterTouches(now) {
+    const events = [];
+    const pw = config.PLAYER.WIDTH;
+    const ph = config.PLAYER.HEIGHT;
+
+    for (const p of this.players.values()) {
+      if (!p.alive) continue;
+      for (const m of this.monsters.values()) {
+        if (!m.alive) continue;
+        // 중심 좌표 기준 AABB 겹침 (몬스터 크기·접촉데미지는 타입별)
+        if (Math.abs(p.x - m.x) <= (pw + m.width) / 2 && Math.abs(p.y - m.y) <= (ph + m.height) / 2) {
+          const res = p.takeDamage(m.touchDamage, now);
+          if (res) events.push({ player: p, dmg: res.dmg, died: res.died, hp: res.hp });
+          break; // 한 틱에 한 몬스터에게만 피격
+        }
+      }
+    }
+    return events;
+  }
+
+  // 부활 대기 시간이 지난 사망 플레이어를 되살린다. 반환: [부활한 Player]
+  respawnPlayers(now, spawn) {
+    const revived = [];
+    for (const p of this.players.values()) {
+      if (!p.alive && now >= p.respawnAt) {
+        p.respawn(spawn);
+        revived.push(p);
+      }
+    }
+    return revived;
   }
 }
 

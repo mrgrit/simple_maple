@@ -50,7 +50,10 @@ class GameScene extends Phaser.Scene {
     this.player = null;
     this.others = {}; // id -> { sprite, label, nick, buffer:[{t,x,y,flipX}] }
     this.monsters = {}; // id -> { sprite, hpBg, hpFill, buffer, hp, maxHp, alive }
-    this.selfExp = 0;
+    this.stats = null;   // 서버 권위 스탯 (init에서 채움) — HUD 표시용
+    this.dead = false;   // 내 사망 상태 (입력/이동보고 차단)
+    this.deadUntil = 0;  // 부활 예정 시각(ms) — 클라 카운트다운 표시용
+    this.deathText = null;
     this.lastAttack = 0; // 클라 공격 쿨다운 타이머
 
     // 위치 보고 throttle 상태
@@ -71,8 +74,7 @@ class GameScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(200);
 
-    // 서버 이벤트 구독 (리스너를 먼저 등록한 뒤 join 요청 → 레이스 방지)
-    Net.on('init', (data) => this.onInit(data));
+    // 서버 이벤트 구독 (init 은 main.js 인증 단계에서 수신 → window.GAME_INIT 로 전달받음)
     Net.on('playerJoined', (p) => this.addOther(p));
     Net.on('playerMoved', (d) => this.onPlayerMoved(d));
     Net.on('playerLeft', (id) => this.removeOther(id));
@@ -82,15 +84,25 @@ class GameScene extends Phaser.Scene {
     Net.on('monsterDied', (d) => this.onMonsterDied(d));
     Net.on('expGained', (d) => this.onExpGained(d));
     Net.on('playerAttacked', (d) => this.onPlayerAttacked(d));
-
-    const nick = window.GAME_NICK || '용사';
-    Net.join(nick);
+    // 성장/생존 (Phase 4)
+    Net.on('levelUp', (d) => this.onLevelUp(d));
+    Net.on('playerLevelUp', (d) => this.onOtherLevelUp(d));
+    Net.on('playerHurt', (d) => this.onPlayerHurt(d));
+    Net.on('playerDied', (d) => this.onPlayerDied(d));
+    Net.on('playerRespawned', (d) => this.onPlayerRespawned(d));
 
     // 입력 설정
     this.cursors = this.input.keyboard.createCursorKeys();
     this.keys = this.input.keyboard.addKeys('W,A,S,D');
     this.jumpKeys = [this.cursors.up, this.cursors.space, this.keys.W];
     this.attackKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X);
+
+    // 마우스 좌클릭(터치 포함) 공격 — 커서 쪽을 바라보고 공격
+    this.input.on('pointerdown', (pointer) => this.onPointerAttack(pointer));
+
+    // 인증 단계(main.js)에서 받은 초기 상태로 즉시 구성 (폴백: init 이벤트 대기)
+    if (window.GAME_INIT) this.onInit(window.GAME_INIT);
+    else Net.on('init', (data) => this.onInit(data));
   }
 
   // 서버 초기 상태 수신 → 월드/플레이어 구성
@@ -102,7 +114,17 @@ class GameScene extends Phaser.Scene {
 
     this.selfId = data.selfId;
     this.tuning = Object.assign(this.tuning, data.tuning || {});
-    this.selfExp = (data.self && data.self.exp) || 0;
+    const s = data.self || {};
+    this.stats = {
+      level: s.level || 1,
+      hp: s.hp || 0,
+      maxHp: s.maxHp || 1,
+      mp: s.mp || 0,
+      maxMp: s.maxMp || 1,
+      exp: s.exp || 0,
+      expToNext: s.expToNext === undefined ? null : s.expToNext,
+      atk: s.atk || 0,
+    };
     const map = data.map;
 
     // 배경색 + 월드/카메라 경계
@@ -144,6 +166,10 @@ class GameScene extends Phaser.Scene {
     // 이미 접속해 있던 다른 플레이어 생성
     (data.players || []).forEach((p) => this.addOther(p));
 
+    // 몬스터 타입별 시각정보 + 텍스처 준비 (서버가 전달한 색/크기로 생성)
+    this.monsterTypes = data.monsterTypes || {};
+    this.ensureMonsterTextures();
+
     // 현재 몬스터 생성
     (data.monsters || []).forEach((m) => this.ensureMonster(m));
 
@@ -152,7 +178,7 @@ class GameScene extends Phaser.Scene {
 
     // 조작 안내 (화면 고정)
     this.add
-      .text(12, 12, '← → / A D 이동   |   ↑ / W / Space 점프   |   X 공격', {
+      .text(12, 12, '← → / A D 이동   |   ↑ / W / Space 점프   |   X / 좌클릭 공격', {
         fontFamily: 'monospace',
         fontSize: '14px',
         color: '#dddddd',
@@ -160,16 +186,8 @@ class GameScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(100);
 
-    // EXP 표시 (화면 좌하단 고정 — 정식 HUD는 Phase 4)
-    this.expText = this.add
-      .text(12, this.scale.height - 26, '', {
-        fontFamily: 'monospace',
-        fontSize: '14px',
-        color: '#ffd966',
-      })
-      .setScrollFactor(0)
-      .setDepth(100);
-    this.updateExpText();
+    // HUD (레벨 / HP / MP / EXP 바) — 화면 좌하단 고정
+    this.buildHud();
 
     // 접속자 수 표시 (화면 우상단 고정)
     this.onlineText = this.add
@@ -204,10 +222,16 @@ class GameScene extends Phaser.Scene {
       .setOrigin(0.5, 1)
       .setDepth(50);
 
+    const dead = p.alive === false;
+    if (dead) {
+      sprite.setVisible(false);
+      label.setVisible(false);
+    }
     this.others[p.id] = {
       sprite,
       label,
       nick: p.nick,
+      dead,
       buffer: [{ t: nowMs(), x: p.x, y: p.y, flipX: p.dir === 'left' }],
     };
     this.updateOnlineCount();
@@ -236,16 +260,149 @@ class GameScene extends Phaser.Scene {
     this.onlineText.setText(`접속자: ${n}명`);
   }
 
-  updateExpText() {
-    if (this.expText) this.expText.setText(`EXP: ${this.selfExp}`);
+  // ---------------- HUD (레벨/HP/MP/EXP) ----------------
+  buildHud() {
+    const pad = 14;
+    const barW = 220;
+    const barH = 16;
+    const gap = 5;
+    const H = this.scale.height;
+    const x = pad;
+    const expY = H - pad - barH;
+    const mpY = expY - gap - barH;
+    const hpY = mpY - gap - barH;
+    const lvY = hpY - 22;
+
+    this.hud = {};
+    this.hud.level = this.add
+      .text(x, lvY, '', {
+        fontFamily: 'monospace',
+        fontSize: '16px',
+        color: '#ffd966',
+        stroke: '#000000',
+        strokeThickness: 3,
+      })
+      .setScrollFactor(0)
+      .setDepth(101);
+
+    this.hud.hp = this.makeBar(x, hpY, barW, barH, 0xff5c5c, 0x5a1616);
+    this.hud.mp = this.makeBar(x, mpY, barW, barH, 0x4aa3ff, 0x143a5a);
+    this.hud.exp = this.makeBar(x, expY, barW, barH, 0xffd93d, 0x5a4a10);
+
+    this.refreshHud();
+  }
+
+  // 바 하나(배경/채움/중앙 텍스트) 생성. 좌상단 원점 기준.
+  makeBar(x, y, w, h, fillColor, bgColor) {
+    const bg = this.add
+      .rectangle(x, y, w, h, bgColor, 0.85)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(100)
+      .setStrokeStyle(2, 0x000000, 0.6);
+    const fill = this.add
+      .rectangle(x, y, w, h, fillColor, 1)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(100);
+    const text = this.add
+      .text(x + w / 2, y + h / 2, '', {
+        fontFamily: 'monospace',
+        fontSize: '12px',
+        color: '#ffffff',
+        stroke: '#000000',
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(102);
+    return { bg, fill, text, w };
+  }
+
+  setBar(bar, val, max, label) {
+    const ratio = max > 0 ? Phaser.Math.Clamp(val / max, 0, 1) : 0;
+    bar.fill.displayWidth = bar.w * ratio;
+    bar.text.setText(label);
+  }
+
+  refreshHud() {
+    if (!this.hud || !this.stats) return;
+    const s = this.stats;
+    this.hud.level.setText(`Lv.${s.level}`);
+    this.setBar(this.hud.hp, s.hp, s.maxHp, `HP ${s.hp}/${s.maxHp}`);
+    this.setBar(this.hud.mp, s.mp, s.maxMp, `MP ${s.mp}/${s.maxMp}`);
+    if (s.expToNext == null) {
+      this.setBar(this.hud.exp, 1, 1, 'EXP MAX');
+    } else {
+      const pct = s.expToNext > 0 ? Math.floor((s.exp / s.expToNext) * 100) : 0;
+      this.setBar(this.hud.exp, s.exp, s.expToNext, `EXP ${s.exp}/${s.expToNext} (${pct}%)`);
+    }
+  }
+
+  // 서버가 보낸 스탯 필드만 골라 병합
+  applyStats(d) {
+    if (!this.stats || !d) return;
+    ['level', 'hp', 'maxHp', 'mp', 'maxMp', 'atk', 'exp', 'expToNext'].forEach((k) => {
+      if (d[k] !== undefined) this.stats[k] = d[k];
+    });
+  }
+
+  // 레벨업/부활 골든 링 연출
+  spawnRing(x, y, color) {
+    const ring = this.add.circle(x, y, 26, color, 0).setStrokeStyle(3, color, 1).setDepth(40);
+    this.tweens.add({
+      targets: ring,
+      scale: 2.4,
+      alpha: 0,
+      duration: 500,
+      onComplete: () => ring.destroy(),
+    });
   }
 
   // ---------------- 몬스터 ----------------
+  // 타입별 플레이스홀더 텍스처(색/크기)를 서버 정보로 런타임 생성
+  ensureMonsterTextures() {
+    for (const type in this.monsterTypes) {
+      const key = 'mon_' + type;
+      if (this.textures.exists(key)) continue;
+      const t = this.monsterTypes[type];
+      this.makeBlobTexture(key, t.width, t.height, t.color, t.stroke);
+    }
+  }
+
+  makeBlobTexture(key, w, h, color, stroke) {
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(color, 1);
+    g.lineStyle(2, stroke, 1);
+    // 아래는 평평하고 위는 둥근 몸체
+    g.beginPath();
+    g.arc(w / 2, h - 6, w / 2 - 2, Math.PI, 0);
+    g.lineTo(w - 2, h - 4);
+    g.lineTo(2, h - 4);
+    g.closePath();
+    g.fillPath();
+    g.strokePath();
+    // 눈 2개 (크기에 비례)
+    const ex = w * 0.18;
+    const ey = h * 0.5;
+    const r = Math.max(2.5, w * 0.1);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(w / 2 - ex, ey, r);
+    g.fillCircle(w / 2 + ex, ey, r);
+    g.fillStyle(0x222222, 1);
+    g.fillCircle(w / 2 - ex, ey, r * 0.5);
+    g.fillCircle(w / 2 + ex, ey, r * 0.5);
+    g.generateTexture(key, w, h);
+    g.destroy();
+  }
+
   ensureMonster(m) {
     if (this.monsters[m.id]) return this.monsters[m.id];
-    const barW = 34;
+    const info = this.monsterTypes[m.type] || { width: 36 };
+    const texKey = this.textures.exists('mon_' + m.type) ? 'mon_' + m.type : 'slime';
+    const barW = Math.max(26, (info.width || 36) - 2);
     const barH = 5;
-    const sprite = this.add.sprite(m.x, m.y, 'slime').setDepth(8);
+    const sprite = this.add.sprite(m.x, m.y, texKey).setDepth(8);
     const hpBg = this.add.rectangle(m.x, m.y, barW, barH, 0x000000, 0.55).setDepth(9);
     const hpFill = this.add
       .rectangle(m.x - barW / 2, m.y, barW, barH, 0x4ade4a)
@@ -256,6 +413,7 @@ class GameScene extends Phaser.Scene {
       hpBg,
       hpFill,
       barW,
+      texKey,
       dir: m.dir,
       buffer: [{ t: nowMs(), x: m.x, y: m.y }],
       hp: m.hp,
@@ -305,8 +463,17 @@ class GameScene extends Phaser.Scene {
   }
 
   // ---------------- 전투 ----------------
+  // 마우스 좌클릭 공격 — 커서 방향을 바라본 뒤 공격
+  onPointerAttack(pointer) {
+    if (!this.ready || this.dead || !this.player) return;
+    if (pointer.leftButtonDown && !pointer.leftButtonDown()) return; // 좌클릭/터치만
+    const wx = pointer.worldX;
+    if (typeof wx === 'number') this.player.setFlipX(wx < this.player.x);
+    this.doAttack();
+  }
+
   doAttack() {
-    if (!this.player) return;
+    if (!this.player || this.dead) return;
     const now = this.time.now;
     const cd = this.tuning.attackCooldown || 350;
     if (now - this.lastAttack < cd) return; // 클라 쿨다운(서버도 검증)
@@ -355,8 +522,8 @@ class GameScene extends Phaser.Scene {
     o.sprite.visible = false;
     o.hpBg.visible = false;
     o.hpFill.visible = false;
-    // 사망 연출: 위로 튀며 납작해지고 사라짐
-    const ghost = this.add.sprite(o.sprite.x, o.sprite.y, 'slime').setDepth(8).setAlpha(0.9);
+    // 사망 연출: 위로 튀며 납작해지고 사라짐 (해당 몬스터 타입 텍스처로)
+    const ghost = this.add.sprite(o.sprite.x, o.sprite.y, o.texKey).setDepth(8).setAlpha(0.9);
     this.tweens.add({
       targets: ghost,
       y: ghost.y - 20,
@@ -369,9 +536,110 @@ class GameScene extends Phaser.Scene {
   }
 
   onExpGained(d) {
-    this.selfExp = d.total;
-    this.updateExpText();
-    if (this.player) this.floatingText(this.player.x, this.player.y - 40, `+${d.exp} EXP`, '#ffd966');
+    this.applyStats(d);
+    this.refreshHud();
+    if (this.player) this.floatingText(this.player.x, this.player.y - 40, `+${d.gain} EXP`, '#ffd966');
+  }
+
+  // 내 레벨업 (스탯 갱신 + 연출)
+  onLevelUp(d) {
+    this.applyStats(d);
+    this.refreshHud();
+    if (!this.player) return;
+    this.floatingText(this.player.x, this.player.y - 62, `LEVEL UP!  Lv.${this.stats.level}`, '#ffe066');
+    this.spawnRing(this.player.x, this.player.y, 0xffe066);
+    this.player.setTint(0xffe066);
+    this.time.delayedCall(220, () => this.player && !this.dead && this.player.clearTint());
+  }
+
+  // 다른 플레이어 레벨업 연출
+  onOtherLevelUp(d) {
+    const o = this.others[d.id];
+    if (!o) return;
+    this.floatingText(o.sprite.x, o.sprite.y - 62, `LEVEL UP! Lv.${d.level}`, '#ffe066');
+    this.spawnRing(o.sprite.x, o.sprite.y, 0xffe066);
+  }
+
+  // 내가 피격 (몬스터 접촉 데미지 — 본인 HUD만 갱신)
+  onPlayerHurt(d) {
+    if (this.stats) {
+      this.stats.hp = d.hp;
+      if (d.maxHp !== undefined) this.stats.maxHp = d.maxHp;
+    }
+    this.refreshHud();
+    if (this.player) {
+      this.player.setTintFill(0xff4444);
+      this.time.delayedCall(120, () => this.player && !this.dead && this.player.clearTint());
+      this.floatingText(this.player.x, this.player.y - 30, `-${d.dmg}`, '#ff6b6b');
+    }
+    this.cameras.main.shake(120, 0.006);
+  }
+
+  // 사망 (본인이면 입력 차단 + 카운트다운 오버레이 / 남이면 스프라이트 숨김)
+  onPlayerDied(d) {
+    if (d.id === this.selfId) {
+      this.dead = true;
+      this.deadUntil = nowMs() + (d.respawnMs || 3000);
+      if (this.stats) this.stats.hp = 0;
+      this.refreshHud();
+      if (this.player) {
+        this.player.body.setVelocity(0, 0);
+        this.player.setTint(0x555555);
+      }
+      this.deathText = this.add
+        .text(this.scale.width / 2, this.scale.height / 2, '', {
+          fontFamily: 'sans-serif',
+          fontSize: '28px',
+          color: '#ff6b6b',
+          stroke: '#000000',
+          strokeThickness: 5,
+          align: 'center',
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(200);
+    } else {
+      const o = this.others[d.id];
+      if (o) {
+        o.dead = true;
+        o.sprite.setVisible(false);
+        o.label.setVisible(false);
+      }
+    }
+  }
+
+  // 부활 (본인이면 위치/HP 복구 + 입력 재개 / 남이면 스프라이트 복귀)
+  onPlayerRespawned(d) {
+    if (d.id === this.selfId) {
+      this.dead = false;
+      this.deadUntil = 0;
+      if (this.deathText) {
+        this.deathText.destroy();
+        this.deathText = null;
+      }
+      if (this.stats) {
+        this.stats.hp = d.hp;
+        this.stats.maxHp = d.maxHp;
+        this.stats.mp = d.mp;
+        this.stats.maxMp = d.maxMp;
+      }
+      this.refreshHud();
+      if (this.player) {
+        this.player.clearTint();
+        this.player.setPosition(d.x, d.y);
+        this.player.body.setVelocity(0, 0);
+      }
+      this.spawnRing(d.x, d.y, 0x9be36b);
+    } else {
+      const o = this.others[d.id];
+      if (o) {
+        o.dead = false;
+        o.sprite.setVisible(true);
+        o.label.setVisible(true);
+        o.sprite.setPosition(d.x, d.y);
+        o.buffer = [{ t: nowMs(), x: d.x, y: d.y, flipX: o.sprite.flipX }];
+      }
+    }
   }
 
   floatingText(x, y, text, color) {
@@ -390,6 +658,16 @@ class GameScene extends Phaser.Scene {
 
   update() {
     if (!this.ready || !this.player) return;
+
+    // ---------- 사망 중: 입력/이동보고 차단 + 부활 카운트다운 ----------
+    if (this.dead) {
+      const remain = Math.max(0, Math.ceil((this.deadUntil - nowMs()) / 1000));
+      if (this.deathText) this.deathText.setText(`쓰러졌습니다!\n${remain}초 후 부활`);
+      this.nameLabel.setPosition(this.player.x, this.player.y - this.player.height / 2 - 4);
+      this.interpolateOthers();
+      this.interpolateMonsters();
+      return;
+    }
 
     // ---------- 내 캐릭터 조작 ----------
     const body = this.player.body;
@@ -462,6 +740,7 @@ class GameScene extends Phaser.Scene {
     const renderTime = nowMs() - INTERP_DELAY_MS;
     for (const id in this.others) {
       const o = this.others[id];
+      if (o.dead) continue; // 사망 중인 타 플레이어는 렌더 스킵(숨김 상태)
       const pos = sampleBuffer(o.buffer, renderTime);
       if (pos) {
         o.sprite.x = pos.x;

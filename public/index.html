@@ -22,11 +22,13 @@
     #login h1 { font-size: 34px; letter-spacing: 2px; color: #ffd966; text-shadow: 0 2px 8px #000; }
     #login p { color: #aab; font-size: 14px; }
     #login .row { display: flex; gap: 10px; }
-    #nick {
+    #nick, #pw {
       padding: 12px 16px; font-size: 16px; border: 2px solid #4a4a6a; border-radius: 8px;
       background: #1a1a2e; color: #fff; outline: none; width: 220px;
     }
-    #nick:focus { border-color: #ffd966; }
+    #nick:focus, #pw:focus { border-color: #ffd966; }
+    #login .fields { display: flex; flex-direction: column; gap: 10px; }
+    #loginErr { min-height: 18px; color: #ff6b6b; font-size: 13px; font-weight: bold; }
     #startBtn {
       padding: 12px 22px; font-size: 16px; font-weight: bold; cursor: pointer;
       border: none; border-radius: 8px; background: #ffd966; color: #222;
@@ -42,13 +44,17 @@
   <!-- 로그인 오버레이 -->
   <div id="login">
     <h1>심플 메이플 MMO</h1>
-    <p>닉네임을 입력하고 모험을 시작하세요</p>
-    <div class="row">
+    <p>닉네임과 비밀번호로 접속하세요 (처음이면 자동 가입 · 진행도 저장됨)</p>
+    <div class="fields">
       <input id="nick" type="text" maxlength="12" placeholder="닉네임 (최대 12자)" autocomplete="off" />
-      <button id="startBtn">시작</button>
+      <div class="row">
+        <input id="pw" type="password" maxlength="32" placeholder="비밀번호" autocomplete="off" />
+        <button id="startBtn">시작</button>
+      </div>
     </div>
+    <div id="loginErr"></div>
     <div class="hint">
-      조작: <b>← →</b> 또는 <b>A D</b> 이동 &nbsp;|&nbsp; <b>↑ / W / Space</b> 점프
+      조작: <b>← →</b> 또는 <b>A D</b> 이동 &nbsp;|&nbsp; <b>↑ / W / Space</b> 점프 &nbsp;|&nbsp; <b>X</b> 공격
     </div>
   </div>
 

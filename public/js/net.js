@@ -23,9 +23,9 @@ window.Net = {
     return this.socket;
   },
 
-  // C→S: 닉네임으로 참가
-  join(nick) {
-    this.socket.emit('join', { nick });
+  // C→S: 닉네임+비밀번호로 참가 (인증 실패 시 서버가 joinError 반환)
+  join(nick, password) {
+    this.socket.emit('join', { nick, password });
   },
 
   // C→S: 이동 보고 (주기적으로 호출)

@@ -26,6 +26,8 @@ module.exports = {
     MAX_HP: 100,
     MAX_MP: 50,
     START_LEVEL: 1,
+    HIT_INVULN_MS: 800,  // 피격 후 무적 시간(연속 피격 완화)
+    RESPAWN_MS: 3000,    // 사망 후 부활까지 대기 시간
   },
 
   // 성장 곡선 (Phase 4에서 사용)
@@ -34,11 +36,13 @@ module.exports = {
     EXP_BASE: 20,
     EXP_POW: 1.5,
     HP_PER_LEVEL: 20,   // 레벨업 시 최대 HP 증가량
+    MP_PER_LEVEL: 10,   // 레벨업 시 최대 MP 증가량
     ATK_PER_LEVEL: 3,   // 레벨업 시 공격력 증가량
     BASE_ATK: 10,
+    MAX_LEVEL: 50,      // 만렙(EXP 곡선 상한 + 레벨업 루프 안전장치)
   },
 
-  // 몬스터 밸런스 (Phase 3에서 사용)
+  // 몬스터 기본값 (타입 테이블에 없는 값의 폴백)
   MONSTER: {
     DEFAULT_HP: 30,
     SPEED: 40,         // 배회 속도 (px/s)
@@ -46,7 +50,18 @@ module.exports = {
     RESPAWN_MS: 4000,  // 사망 후 리스폰까지 대기 시간
     WIDTH: 36,
     HEIGHT: 32,
-    TOUCH_DAMAGE: 6,   // 몬스터 접촉 시 플레이어가 받는 데미지(Phase 4 HP 연동)
+    TOUCH_DAMAGE: 6,   // 몬스터 접촉 시 플레이어가 받는 데미지
+  },
+
+  // 몬스터 타입 테이블 — 종류별 스탯/크기/색 (서버 권위, 시각정보는 init로 클라 전달)
+  // 난이도 순: 달팽이(쉬움) → 돌골렘(미니보스). color/stroke 는 0xRRGGBB.
+  MONSTER_TYPES: {
+    snail:    { name: '달팽이',    hp: 15,  speed: 20, expDrop: 5,  touchDamage: 3,  respawnMs: 4000, width: 30, height: 24, color: 0x8ecae6, stroke: 0x4a90b8 },
+    slime:    { name: '초록슬라임', hp: 25,  speed: 45, expDrop: 10, touchDamage: 5,  respawnMs: 4000, width: 36, height: 32, color: 0x6bc16b, stroke: 0x3f9b50 },
+    redSlime: { name: '빨강슬라임', hp: 40,  speed: 60, expDrop: 16, touchDamage: 8,  respawnMs: 5000, width: 38, height: 34, color: 0xff6b6b, stroke: 0xc23b3b },
+    mushroom: { name: '버섯',      hp: 60,  speed: 35, expDrop: 24, touchDamage: 11, respawnMs: 6000, width: 42, height: 40, color: 0xffa94d, stroke: 0xd9822b },
+    boar:     { name: '멧돼지',    hp: 80,  speed: 80, expDrop: 32, touchDamage: 14, respawnMs: 6000, width: 48, height: 38, color: 0xd88ab0, stroke: 0xa85a82 },
+    golem:    { name: '돌골렘',    hp: 140, speed: 25, expDrop: 60, touchDamage: 20, respawnMs: 9000, width: 54, height: 54, color: 0x9aa0a6, stroke: 0x5f6469 },
   },
 
   // 전투 (Phase 3에서 사용) — 모든 판정/데미지는 서버 권위

@@ -1,33 +1,51 @@
 // =============================================================
 // Monster.js — 몬스터 상태 모델 (서버 권위)
-//   위치/HP/배회 AI/리스폰을 모두 서버가 관리한다.
-//   클라이언트는 monstersUpdate 로 받은 결과만 렌더링한다(치팅 방지).
+//   타입별 스탯(HP/속도/EXP/접촉데미지/크기)을 config.MONSTER_TYPES 에서 읽는다.
+//   위치/HP/배회 AI/리스폰을 모두 서버가 관리하며, 클라는 결과만 렌더링한다.
+//   스폰/리스폰 위치는 배회 범위 내에서 랜덤 → "항상 같은 자리" 문제 완화.
 // =============================================================
 
 const config = require('../config');
 
 let nextId = 1;
 
+// [min, max] 사이 실수 랜덤 (범위가 유효하지 않으면 min)
+function randBetween(min, max) {
+  if (!(max > min)) return min;
+  return min + Math.random() * (max - min);
+}
+
 class Monster {
   constructor(spawn) {
     this.id = `m${nextId++}`;
     this.type = spawn.type || 'slime';
 
-    // 스폰 위치(리스폰 시 복귀 지점)
-    this.spawnX = spawn.x;
-    this.spawnY = spawn.y;
-    this.x = spawn.x;
-    this.y = spawn.y;
-    this.dir = 'left';
-
-    this.maxHp = config.MONSTER.DEFAULT_HP;
-    this.hp = this.maxHp;
-    this.expDrop = config.MONSTER.EXP_DROP;
+    // 타입별 스탯 (테이블에 없으면 기본값 폴백)
+    const t = config.MONSTER_TYPES[this.type] || {};
+    const D = config.MONSTER;
+    this.maxHp = t.hp != null ? t.hp : D.DEFAULT_HP;
+    this.speed = t.speed != null ? t.speed : D.SPEED;
+    this.expDrop = t.expDrop != null ? t.expDrop : D.EXP_DROP;
+    this.touchDamage = t.touchDamage != null ? t.touchDamage : D.TOUCH_DAMAGE;
+    this.respawnMs = t.respawnMs != null ? t.respawnMs : D.RESPAWN_MS;
+    this.width = t.width != null ? t.width : D.WIDTH;
+    this.height = t.height != null ? t.height : D.HEIGHT;
 
     // 배회 범위 (좌/우 한계)
     this.patrolMin = spawn.patrolMin;
     this.patrolMax = spawn.patrolMax;
 
+    // 서 있는 지면(플랫폼/바닥) 상단 y — 그 위에 몸 중심이 오도록 y 계산.
+    // 하위호환: groundY 없으면 옛 스타일 spawn.y(중심) 사용.
+    this.groundY =
+      spawn.groundY != null ? spawn.groundY : spawn.y != null ? spawn.y + this.height / 2 : 680;
+    this.y = this.groundY - this.height / 2;
+
+    // 초기 위치/방향 랜덤 (배회 범위 내)
+    this.x = randBetween(this.patrolMin, this.patrolMax);
+    this.dir = Math.random() < 0.5 ? 'left' : 'right';
+
+    this.hp = this.maxHp;
     this.alive = true;
     this.respawnAt = 0; // 사망 시 리스폰 예정 시각(ms)
   }
@@ -38,8 +56,7 @@ class Monster {
       if (now >= this.respawnAt) this.respawn();
       return;
     }
-    // 좌우 배회: 한계에 닿으면 방향 전환
-    const step = config.MONSTER.SPEED * dt;
+    const step = this.speed * dt;
     if (this.dir === 'right') {
       this.x += step;
       if (this.x >= this.patrolMax) {
@@ -61,18 +78,19 @@ class Monster {
     this.hp = Math.max(0, this.hp - dmg);
     if (this.hp === 0) {
       this.alive = false;
-      this.respawnAt = now + config.MONSTER.RESPAWN_MS;
+      this.respawnAt = now + this.respawnMs;
       return { died: true, hp: 0 };
     }
     return { died: false, hp: this.hp };
   }
 
+  // 리스폰: 배회 범위 내 랜덤 위치/방향으로 부활 (같은 자리 반복 방지)
   respawn() {
     this.alive = true;
     this.hp = this.maxHp;
-    this.x = this.spawnX;
-    this.y = this.spawnY;
-    this.dir = 'left';
+    this.x = randBetween(this.patrolMin, this.patrolMax);
+    this.y = this.groundY - this.height / 2;
+    this.dir = Math.random() < 0.5 ? 'left' : 'right';
   }
 
   serialize() {

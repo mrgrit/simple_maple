@@ -27,6 +27,7 @@ const scene = (page, fn) => page.evaluate(fn);
     await page.goto((process.env.BASE_URL || 'http://localhost:3000'), { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForSelector('#nick', { timeout: 5000 });
     await page.type('#nick', 'Hunter');
+    await page.type('#pw', 'test1234'); // 계정 비밀번호(신규 자동 가입)
     await page.click('#startBtn');
     await page.waitForFunction(
       () => {

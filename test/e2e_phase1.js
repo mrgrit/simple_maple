@@ -46,6 +46,7 @@ const ok = (name, cond, extra = '') => {
     // 닉네임 입력 후 시작
     await page.waitForSelector('#nick', { timeout: 5000 });
     await page.type('#nick', 'TestHero');
+    await page.type('#pw', 'test1234'); // 계정 비밀번호(신규 자동 가입)
     await page.click('#startBtn');
     ok('로그인 → 게임 시작', true);
 
